@@ -23,7 +23,7 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
     let mock = Mock::new(&sender);
 
     // Construct the counter interface
-    let contract = DCAApp::new(DCA_APP_ID, mock.clone());
+    let mut contract = DCAApp::new(DCA_APP_ID, mock.clone());
 
     // Deploy Abstract to the mock
     let abstr_deployment = Abstract::deploy_on(mock, Empty {})?;
@@ -58,8 +58,10 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
         None,
     )?;
 
-    let modules = account.manager.module_infos(None, None)?;
-    contract.set_address(&modules.module_infos[1].address);
+    let module_addr = account.manager.module_info(DCA_APP_ID)?.unwrap().address;
+    contract.set_address(&module_addr);
+    let manager_addr = account.manager.address()?;
+    contract.set_sender(&manager_addr);
 
     Ok((account, abstr_deployment, contract))
 }
