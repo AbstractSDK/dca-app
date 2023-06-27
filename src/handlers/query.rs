@@ -11,6 +11,6 @@ pub fn query_handler(deps: Deps, _env: Env, _app: &DCAApp, msg: AppQueryMsg) -> 
 }
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
-    let _config = CONFIG.load(deps.storage)?;
-    Ok(ConfigResponse {})
+    let config = CONFIG.load(deps.storage)?;
+    Ok(ConfigResponse { config })
 }

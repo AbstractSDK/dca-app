@@ -11,7 +11,7 @@ use cosmwasm_std::Response;
 /// The version of your app
 pub const DCA_APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The id of the app
-pub const DCA_APP_ID: &str = "dca:app";
+pub const DCA_APP_ID: &str = "abstract:dca";
 
 /// The type of the result returned by your app's entry points.
 pub type AppResult<T = Response> = Result<T, AppError>;

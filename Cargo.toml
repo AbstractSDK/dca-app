@@ -1,5 +1,5 @@
 [package]
-name = "dca-app"
+name = "abstract-dca-app"
 version = "0.0.1"
 authors = [
   "CyberHoward <cyberhoward@protonmail.com>",
@@ -48,10 +48,10 @@ abstract-sdk = { version = "0.16.1" }
 # Dependencies for interface
 abstract-interface = { version = "0.16.1", optional = true }
 cw-orch = { version = "0.13", optional = true }
-croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git"}
-
+croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git", rev = "4c5fd90" }
+abstract-dex-adapter = { git = "https://github.com/AbstractSDK/adapters.git" }
 [dev-dependencies]
-dca-app = { path = ".", features = ["interface"] }
+abstract-dca-app = { path = ".", features = ["interface"] }
 abstract-interface = { version = "0.16.1", features = ["daemon"] }
 abstract-testing = { version = "0.16.1" }
 abstract-sdk = { version = "0.16.1", features = ["test-utils"] }

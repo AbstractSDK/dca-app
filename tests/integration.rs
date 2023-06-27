@@ -1,17 +1,19 @@
 use abstract_core::{app::BaseInstantiateMsg, objects::gov_type::GovernanceDetails};
-use abstract_interface::{Abstract, AbstractAccount, AppDeployer, VCExecFns, *};
-use dca_app::{
+use abstract_dca_app::state::Config;
+use abstract_dca_app::{
     contract::{DCA_APP_ID, DCA_APP_VERSION},
     msg::{AppInstantiateMsg, ConfigResponse, InstantiateMsg},
     *,
 };
+use abstract_interface::{Abstract, AbstractAccount, AppDeployer, VCExecFns, *};
 // Use prelude to get all the necessary imports
 use cw_orch::{anyhow, deploy::Deploy, prelude::*};
 
-use cosmwasm_std::Addr;
+use cosmwasm_std::{Addr, Uint128};
 
 // consts for testing
 const ADMIN: &str = "admin";
+const DENOM: &str = "abstr";
 
 /// Set up the test environment with the contract installed
 fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock>)> {
@@ -47,7 +49,11 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
             base: BaseInstantiateMsg {
                 ans_host_address: abstr_deployment.ans_host.addr_str()?,
             },
-            module: AppInstantiateMsg {},
+            module: AppInstantiateMsg {
+                native_denom: DENOM.to_owned(),
+                dca_creation_amount: Uint128::new(5_000_000),
+                refill_threshold: Uint128::new(1_000_000),
+            },
         },
         None,
     )?;
@@ -63,7 +69,16 @@ fn successful_install() -> anyhow::Result<()> {
     // Set up the environment and contract
     let (_account, _abstr, app) = setup()?;
 
-    let config = app.config()?;
-    assert_eq!(config, ConfigResponse {});
+    let config: ConfigResponse = app.config()?;
+    assert_eq!(
+        config,
+        ConfigResponse {
+            config: Config {
+                native_denom: DENOM.to_owned(),
+                dca_creation_amount: Uint128::new(5_000_000),
+                refill_threshold: Uint128::new(1_000_000)
+            }
+        }
+    );
     Ok(())
 }

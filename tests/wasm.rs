@@ -1,5 +1,5 @@
-use dca_app::contract::DCA_APP_ID;
-use dca_app::DCAApp;
+use abstract_dca_app::contract::DCA_APP_ID;
+use abstract_dca_app::DCAApp;
 
 use cw_orch::prelude::*;
 
