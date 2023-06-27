@@ -1,6 +1,6 @@
 use cosmwasm_schema::QueryResponses;
 
-use crate::contract::App;
+use crate::contract::DCAApp;
 
 // This is used for type safety
 // The second part is used to indicate the messages are used as the apps messages
@@ -12,7 +12,7 @@ use crate::contract::App;
 
 // impl app::AppExecuteMsg for AppExecuteMsg {}
 // impl app::AppQueryMsg for AppQueryMsg {}
-abstract_app::app_messages!(App, AppExecuteMsg, AppQueryMsg);
+abstract_app::app_messages!(DCAApp, AppExecuteMsg, AppQueryMsg);
 
 /// App instantiate message
 #[cosmwasm_schema::cw_serde]
