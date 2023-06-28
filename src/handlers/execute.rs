@@ -138,7 +138,7 @@ fn convert(deps: DepsMut, env: Env, info: MessageInfo, app: DCAApp, dca_id: Stri
     let dex = app.dex(deps.as_ref(), dca.dex);
     let offer_asset = OfferAsset {
         name: dca.source_asset.into(),
-        amount: Uint128::new(1),
+        amount: Uint128::new(100),
     };
     let swap_msg = dex.swap(offer_asset, dca.target_asset.into(), None, None)?;
     Ok(app.tag_response(Response::new().add_message(swap_msg), "convert"))

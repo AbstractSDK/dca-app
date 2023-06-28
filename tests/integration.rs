@@ -160,8 +160,8 @@ fn successful_install() -> anyhow::Result<()> {
     app.create_dca(
         WYNDEX_WITHOUT_CHAIN.to_owned(),
         Frequency::EveryNBlocks(1),
-        USD.to_owned(),
         EUR.to_owned(),
+        USD.to_owned(),
     )?;
 
     // Only manager should be able to execute this one
