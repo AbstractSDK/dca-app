@@ -18,7 +18,7 @@ pub fn instantiate_handler(
     };
 
     CONFIG.save(deps.storage, &config)?;
-    NEXT_ID.save(deps.storage, &0)?;
+    NEXT_ID.save(deps.storage, &1)?;
     // Example instantiation that doesn't do anything
     Ok(Response::new())
 }

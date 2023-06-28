@@ -28,7 +28,13 @@ const ADMIN: &str = "admin";
 const WYNDEX_WITHOUT_CHAIN: &str = "wyndex";
 
 /// Set up the test environment with the contract installed
-fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock>)> {
+fn setup() -> anyhow::Result<(
+    Mock,
+    AbstractAccount<Mock>,
+    Abstract<Mock>,
+    DCAApp<Mock>,
+    Addr,
+)> {
     // Create a sender
     let sender = Addr::unchecked(ADMIN);
     // Create the mock
@@ -73,7 +79,6 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
         },
         None,
     )?;
-
     // Create a new account to install the app onto
     let account =
         abstr_deployment
@@ -81,6 +86,12 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
             .create_default_account(GovernanceDetails::Monarchy {
                 monarch: ADMIN.to_string(),
             })?;
+    // Install DEX
+    account.manager.install_module(EXCHANGE, &Empty {}, None)?;
+    let module_addr = account.manager.module_info(EXCHANGE)?.unwrap().address;
+    dex_adapter.set_address(&module_addr);
+
+    // Install croncat
     account.install_module(
         CRONCAT_ID,
         &croncat_app::msg::InstantiateMsg {
@@ -95,10 +106,9 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
     croncat_contract.set_address(&module_addr);
     let manager_addr = account.manager.address()?;
     croncat_contract.set_sender(&manager_addr);
-    mock.set_balance(&account.proxy.address()?, coins(500_000, DENOM))?;
 
+    // Install DCA
     contract.deploy(DCA_APP_VERSION.parse()?)?;
-
     account.install_module(
         DCA_APP_ID,
         &InstantiateMsg {
@@ -116,17 +126,19 @@ fn setup() -> anyhow::Result<(AbstractAccount<Mock>, Abstract<Mock>, DCAApp<Mock
 
     let module_addr = account.manager.module_info(DCA_APP_ID)?.unwrap().address;
     contract.set_address(&module_addr);
-    let manager_addr = account.manager.address()?;
     contract.set_sender(&manager_addr);
-    mock.set_balance(&account.proxy.address()?, vec![coin(10_000, EUR)])?;
+    mock.set_balance(
+        &account.proxy.address()?,
+        vec![coin(50_000_000, DENOM), coin(10_000, EUR)],
+    )?;
 
-    Ok((account, abstr_deployment, contract))
+    Ok((mock, account, abstr_deployment, contract, croncat.manager))
 }
 
 #[test]
 fn successful_install() -> anyhow::Result<()> {
     // Set up the environment and contract
-    let (_account, _abstr, app) = setup()?;
+    let (mock, account, _abstr, mut app, manager_addr) = setup()?;
 
     let config: ConfigResponse = app.config()?;
     assert_eq!(
@@ -139,13 +151,19 @@ fn successful_install() -> anyhow::Result<()> {
             }
         }
     );
-    let res = app
-        .create_dca(
-            USD.to_owned(),
-            Frequency::EveryNBlocks(1),
-            WYNDEX_WITHOUT_CHAIN.to_owned(),
-            EUR.to_owned(),
-        )
-        .unwrap();
+    app.create_dca(
+        WYNDEX_WITHOUT_CHAIN.to_owned(),
+        Frequency::EveryNBlocks(1),
+        USD.to_owned(),
+        EUR.to_owned(),
+    )?;
+
+    // Only manager should be able to execute this one
+    app.set_sender(&manager_addr);
+
+    app.convert("dca_1".to_owned())?;
+
+    let usd_balance = mock.query_balance(&account.proxy.address()?, USD)?;
+    println!("usd_balance: {usd_balance}");
     Ok(())
 }
