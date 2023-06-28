@@ -21,15 +21,15 @@ abstract_app::app_messages!(DCAApp, AppExecuteMsg, AppQueryMsg);
 #[non_exhaustive]
 pub enum Frequency {
     /// Blocks will schedule the next DCA purchase every `n` blocks.
-    EveryNBlocks(Uint64),
+    EveryNBlocks(u64),
     /// Time will schedule the next DCA purchase after every `n` seconds.
-    EveryNSeconds(Uint64),
+    EveryNSeconds(u64),
 }
 
 impl Frequency {
     pub fn into_interval(self) -> CronCatInterval {
         match self {
-            Frequency::EveryNBlocks(blocks) => CronCatInterval::Block(blocks.u64()),
+            Frequency::EveryNBlocks(blocks) => CronCatInterval::Block(blocks),
             Frequency::EveryNSeconds(_) => todo!(),
         }
     }
@@ -79,7 +79,7 @@ pub enum AppExecuteMsg {
         /// Unique identifier for the DCA
         dca_id: String,
     },
-    ExecuteSwap {
+    Convert {
         dca_id: String,
     },
 }

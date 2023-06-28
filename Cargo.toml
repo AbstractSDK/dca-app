@@ -48,7 +48,7 @@ abstract-sdk = { version = "0.16.1" }
 # Dependencies for interface
 abstract-interface = { version = "0.16.1", optional = true }
 cw-orch = { version = "0.13", optional = true }
-croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git", rev = "4c5fd90" }
+croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git", rev = "5077a7e" }
 abstract-dex-adapter = { git = "https://github.com/AbstractSDK/adapters.git" }
 [dev-dependencies]
 abstract-dca-app = { path = ".", features = ["interface"] }
@@ -60,3 +60,12 @@ semver = "1.0"
 dotenv = "0.15.0"
 env_logger = "0.10.0"
 cw-orch = { version = "0.13", features = ["daemon"] }
+
+croncat-integration-testing = { version = "1.1.0" }
+wyndex-bundle = { git = "https://github.com/AbstractSDK/integration-bundles.git" }
+abstract-dex-adapter = { git = "https://github.com/AbstractSDK/adapters.git", features = [
+  "interface",
+] }
+croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git", rev = "5077a7e", features = [
+  "interface",
+] }

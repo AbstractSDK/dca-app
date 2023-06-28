@@ -1,10 +1,12 @@
 use abstract_core::objects::UncheckedContractEntry;
+use abstract_dex_adapter::msg::OfferAsset;
 use abstract_sdk::features::{AbstractNameService, AbstractResponse, AccountIdentification};
 use cosmwasm_std::{wasm_execute, DepsMut, Env, MessageInfo, Response, Uint128};
 use cw_asset::{Asset, AssetList};
 
 use crate::contract::{AppResult, DCAApp};
 
+use crate::error::AppError;
 use crate::msg::{AppExecuteMsg, ExecuteMsg, Frequency};
 use crate::state::{DCAEntry, CONFIG, DCA_LIST, NEXT_ID};
 use abstract_dex_adapter::api::DexInterface;
@@ -43,8 +45,17 @@ pub fn execute_handler(
             new_dex,
         } => todo!(),
         AppExecuteMsg::CancelDCA { dca_id } => todo!(),
-        AppExecuteMsg::ExecuteSwap { dca_id } => todo!(),
+        AppExecuteMsg::Convert { dca_id } => convert(deps, env, info, app, dca_id),
     }
+}
+
+/// Update the configuration of the app
+fn update_config(deps: DepsMut, msg_info: MessageInfo, app: DCAApp) -> AppResult {
+    // Only the admin should be able to call this
+    app.admin.assert_admin(deps.as_ref(), &msg_info.sender)?;
+    let mut _config = CONFIG.load(deps.storage)?;
+
+    Ok(app.tag_response(Response::default(), "update_config"))
 }
 
 fn create_dca(
@@ -82,7 +93,7 @@ fn create_dca(
         actions: vec![CronCatAction {
             msg: wasm_execute(
                 env.contract.address,
-                &ExecuteMsg::from(AppExecuteMsg::ExecuteSwap {
+                &ExecuteMsg::from(AppExecuteMsg::Convert {
                     dca_id: dca_id.clone(),
                 }),
                 vec![],
@@ -102,16 +113,33 @@ fn create_dca(
 
     let task_msg = app
         .cron_cat(deps.as_ref())
-        .create_task(task, dca_id, assets)?;
+        .create_task(task, dca_id.clone(), assets)?;
 
-    Ok(app.tag_response(Response::default().add_message(task_msg), "create_dca"))
+    Ok(app.tag_response(
+        Response::new()
+            .add_message(task_msg)
+            .add_attribute("dca_id", dca_id),
+        "create_dca",
+    ))
 }
 
-/// Update the configuration of the app
-fn update_config(deps: DepsMut, msg_info: MessageInfo, app: DCAApp) -> AppResult {
-    // Only the admin should be able to call this
-    app.admin.assert_admin(deps.as_ref(), &msg_info.sender)?;
-    let mut _config = CONFIG.load(deps.storage)?;
+fn convert(deps: DepsMut, env: Env, info: MessageInfo, app: DCAApp, dca_id: String) -> AppResult {
+    let config = CONFIG.load(deps.storage)?;
+    let dca = DCA_LIST.load(deps.storage, dca_id.clone())?;
 
-    Ok(app.tag_response(Response::default(), "update_config"))
+    let manager_addr = app
+        .cron_cat(deps.as_ref())
+        .query_manager_addr(env.contract.address, dca_id.clone())?;
+    if manager_addr != info.sender {
+        return Err(AppError::NotManagerConvert {});
+    }
+
+    let dex = app.dex(deps.as_ref(), dca.dex);
+    let offer_asset = OfferAsset {
+        name: dca.source_asset.into(),
+        amount: Uint128::new(1),
+    };
+    let swap_msg = dex.swap(offer_asset, dca.target_asset.into(), None, None)?;
+    println!("swap_msg: {swap_msg:?}");
+    Ok(app.tag_response(Response::new(), "convert"))
 }
