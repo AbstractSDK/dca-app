@@ -65,6 +65,7 @@ croncat-integration-testing = { version = "1.1.0" }
 wyndex-bundle = { git = "https://github.com/AbstractSDK/integration-bundles.git" }
 abstract-dex-adapter = { git = "https://github.com/AbstractSDK/adapters.git", features = [
   "interface",
+  "juno",
 ] }
 croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git", rev = "5077a7e", features = [
   "interface",

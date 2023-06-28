@@ -126,6 +126,12 @@ fn setup() -> anyhow::Result<(
 
     let module_addr = account.manager.module_info(DCA_APP_ID)?.unwrap().address;
     contract.set_address(&module_addr);
+    account.manager.update_adapter_authorized_addresses(
+        EXCHANGE,
+        vec![module_addr.to_string()],
+        vec![],
+    )?;
+
     contract.set_sender(&manager_addr);
     mock.set_balance(
         &account.proxy.address()?,
