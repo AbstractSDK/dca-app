@@ -170,6 +170,9 @@ fn successful_install() -> anyhow::Result<()> {
     app.convert("dca_1".to_owned())?;
 
     let usd_balance = mock.query_balance(&account.proxy.address()?, USD)?;
-    println!("usd_balance: {usd_balance}");
+    assert_eq!(usd_balance, Uint128::new(98));
+    let eur_balance = mock.query_balance(&account.proxy.address()?, EUR)?;
+    assert_eq!(eur_balance, Uint128::new(9900));
+
     Ok(())
 }

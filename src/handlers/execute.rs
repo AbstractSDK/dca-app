@@ -1,7 +1,7 @@
 use abstract_core::objects::UncheckedContractEntry;
 use abstract_dex_adapter::msg::OfferAsset;
 use abstract_sdk::features::{AbstractNameService, AbstractResponse, AccountIdentification};
-use cosmwasm_std::{wasm_execute, DepsMut, Env, MessageInfo, Response, Uint128};
+use cosmwasm_std::{wasm_execute, Decimal, DepsMut, Env, MessageInfo, Response, Uint128};
 use croncat_app::contract::CRONCAT_ID;
 use cw_asset::{Asset, AssetList};
 
@@ -140,6 +140,11 @@ fn convert(deps: DepsMut, env: Env, info: MessageInfo, app: DCAApp, dca_id: Stri
         name: dca.source_asset.into(),
         amount: Uint128::new(100),
     };
-    let swap_msg = dex.swap(offer_asset, dca.target_asset.into(), None, None)?;
+    let swap_msg = dex.swap(
+        offer_asset,
+        dca.target_asset.into(),
+        Some(Decimal::percent(30)),
+        None,
+    )?;
     Ok(app.tag_response(Response::new().add_message(swap_msg), "convert"))
 }
