@@ -1,8 +1,11 @@
 use cosmwasm_schema::QueryResponses;
-use cosmwasm_std::{Uint128, Uint64};
+use cosmwasm_std::Uint128;
 use croncat_app::croncat_integration_utils::CronCatInterval;
 
-use crate::{contract::DCAApp, state::Config};
+use crate::{
+    contract::DCAApp,
+    state::{Config, DCAEntry},
+};
 
 // This is used for type safety
 // The second part is used to indicate the messages are used as the apps messages
@@ -27,7 +30,7 @@ pub enum Frequency {
 }
 
 impl Frequency {
-    pub fn into_interval(self) -> CronCatInterval {
+    pub fn to_interval(self) -> CronCatInterval {
         match self {
             Frequency::EveryNBlocks(blocks) => CronCatInterval::Block(blocks),
             Frequency::EveryNSeconds(_) => todo!(),
@@ -91,6 +94,8 @@ pub enum AppExecuteMsg {
 pub enum AppQueryMsg {
     #[returns(ConfigResponse)]
     Config {},
+    #[returns(DCAResponse)]
+    DCA { dca_id: String },
 }
 
 #[cosmwasm_schema::cw_serde]
@@ -99,4 +104,9 @@ pub enum AppMigrateMsg {}
 #[cosmwasm_schema::cw_serde]
 pub struct ConfigResponse {
     pub config: Config,
+}
+
+#[cosmwasm_schema::cw_serde]
+pub struct DCAResponse {
+    pub dca: Option<DCAEntry>,
 }

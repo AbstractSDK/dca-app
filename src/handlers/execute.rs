@@ -1,19 +1,20 @@
-use abstract_core::objects::UncheckedContractEntry;
+#![allow(clippy::too_many_arguments)]
 use abstract_dex_adapter::msg::OfferAsset;
-use abstract_sdk::features::{AbstractNameService, AbstractResponse, AccountIdentification};
-use cosmwasm_std::{wasm_execute, Decimal, DepsMut, Env, MessageInfo, Response, Uint128};
-use croncat_app::contract::CRONCAT_ID;
+use abstract_sdk::features::AbstractResponse;
+use cosmwasm_std::{
+    wasm_execute, CosmosMsg, Decimal, DepsMut, Env, MessageInfo, Response, Uint128,
+};
 use cw_asset::{Asset, AssetList};
 
 use crate::contract::{AppResult, DCAApp};
 
 use crate::error::AppError;
 use crate::msg::{AppExecuteMsg, ExecuteMsg, Frequency};
-use crate::state::{DCAEntry, CONFIG, DCA_LIST, NEXT_ID};
+use crate::state::{Config, DCAEntry, CONFIG, DCA_LIST, NEXT_ID};
 use abstract_dex_adapter::api::DexInterface;
-use abstract_sdk::prelude::*;
-use croncat_app::croncat_integration_utils::{CronCatAction, CronCatInterval, CronCatTaskRequest};
-use croncat_app::{CronCatInterface, CRON_CAT_FACTORY};
+use abstract_sdk::AbstractSdkResult;
+use croncat_app::croncat_integration_utils::{CronCatAction, CronCatTaskRequest};
+use croncat_app::{CronCat, CronCatInterface};
 pub fn execute_handler(
     deps: DepsMut,
     env: Env,
@@ -44,8 +45,18 @@ pub fn execute_handler(
             new_target_asset,
             new_frequency,
             new_dex,
-        } => todo!(),
-        AppExecuteMsg::CancelDCA { dca_id } => todo!(),
+        } => update_dca(
+            deps,
+            env,
+            info,
+            app,
+            dca_id,
+            new_source_asset,
+            new_target_asset,
+            new_frequency,
+            new_dex,
+        ),
+        AppExecuteMsg::CancelDCA { dca_id } => cancel_dca(deps, info, app, dca_id),
         AppExecuteMsg::Convert { dca_id } => convert(deps, env, info, app, dca_id),
     }
 }
@@ -59,33 +70,14 @@ fn update_config(deps: DepsMut, msg_info: MessageInfo, app: DCAApp) -> AppResult
     Ok(app.tag_response(Response::default(), "update_config"))
 }
 
-fn create_dca(
-    deps: DepsMut,
+fn create_convert_task_internal(
     env: Env,
-    info: MessageInfo,
-    app: DCAApp,
-    source_asset: String,
-    target_asset: String,
-    frequency: Frequency,
-    dex_name: String,
-) -> AppResult {
-    // Only the admin should be able to create dca
-    app.admin.assert_admin(deps.as_ref(), &info.sender)?;
-    let config = CONFIG.load(deps.storage)?;
-
-    // Generate DCA ID
-    let dca_id = format!("dca_{}", NEXT_ID.load(deps.storage)?);
-
-    let dca_entry = DCAEntry {
-        source_asset,
-        target_asset,
-        frequency,
-        dex: dex_name,
-    };
-    DCA_LIST.save(deps.storage, dca_id.clone(), &dca_entry)?;
-
-    let interval = frequency.into_interval();
-
+    dca: DCAEntry,
+    dca_id: String,
+    cron_cat: CronCat<DCAApp>,
+    config: Config,
+) -> AbstractSdkResult<CosmosMsg> {
+    let interval = dca.frequency.to_interval();
     let task = CronCatTaskRequest {
         interval,
         boundary: None,
@@ -111,10 +103,36 @@ fn create_dca(
         config.dca_creation_amount,
     )])
     .into();
+    cron_cat.create_task(task, dca_id, assets)
+}
 
-    let task_msg = app
-        .cron_cat(deps.as_ref())
-        .create_task(task, dca_id.clone(), assets)?;
+fn create_dca(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    app: DCAApp,
+    source_asset: String,
+    target_asset: String,
+    frequency: Frequency,
+    dex_name: String,
+) -> AppResult {
+    // Only the admin should be able to create dca
+    app.admin.assert_admin(deps.as_ref(), &info.sender)?;
+    let config = CONFIG.load(deps.storage)?;
+    let id = NEXT_ID.update(deps.storage, |id| AppResult::Ok(id + 1))?;
+    // Generate DCA ID
+    let dca_id = format!("dca_{id}");
+
+    let dca_entry = DCAEntry {
+        source_asset,
+        target_asset,
+        frequency,
+        dex: dex_name,
+    };
+    DCA_LIST.save(deps.storage, dca_id.clone(), &dca_entry)?;
+
+    let cron_cat = app.cron_cat(deps.as_ref());
+    let task_msg = create_convert_task_internal(env, dca_entry, dca_id.clone(), cron_cat, config)?;
 
     Ok(app.tag_response(
         Response::new()
@@ -124,27 +142,94 @@ fn create_dca(
     ))
 }
 
+fn update_dca(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    app: DCAApp,
+    dca_id: String,
+    new_source_asset: Option<String>,
+    new_target_asset: Option<String>,
+    new_frequency: Option<Frequency>,
+    new_dex: Option<String>,
+) -> AppResult {
+    app.admin.assert_admin(deps.as_ref(), &info.sender)?;
+
+    let recreate_task = new_frequency.is_some();
+    let dca = DCA_LIST.update(deps.storage, dca_id.clone(), |dca| {
+        let old_dca = dca.ok_or(AppError::DcaNotFound {})?;
+        let new_dca = DCAEntry {
+            source_asset: new_source_asset.unwrap_or(old_dca.source_asset),
+            target_asset: new_target_asset.unwrap_or(old_dca.target_asset),
+            frequency: new_frequency.unwrap_or(old_dca.frequency),
+            dex: new_dex.unwrap_or(old_dca.dex),
+        };
+        AppResult::Ok(new_dca)
+    })?;
+
+    let response = if recreate_task {
+        let config = CONFIG.load(deps.storage)?;
+        let cron_cat = app.cron_cat(deps.as_ref());
+        let remove_task_msg = cron_cat.remove_task(dca_id.clone())?;
+        let create_task_msg = create_convert_task_internal(env, dca, dca_id, cron_cat, config)?;
+        Response::new().add_messages(vec![remove_task_msg, create_task_msg])
+    } else {
+        Response::new()
+    };
+    Ok(app.tag_response(response, "update_dca"))
+}
+
+fn cancel_dca(deps: DepsMut, info: MessageInfo, app: DCAApp, dca_id: String) -> AppResult {
+    app.admin.assert_admin(deps.as_ref(), &info.sender)?;
+
+    DCA_LIST.remove(deps.storage, dca_id.clone());
+
+    let cron_cat = app.cron_cat(deps.as_ref());
+    let remove_task_msg = cron_cat.remove_task(dca_id)?;
+
+    Ok(app.tag_response(Response::new().add_message(remove_task_msg), "cancel_dca"))
+}
+
 fn convert(deps: DepsMut, env: Env, info: MessageInfo, app: DCAApp, dca_id: String) -> AppResult {
     let config = CONFIG.load(deps.storage)?;
     let dca = DCA_LIST.load(deps.storage, dca_id.clone())?;
 
-    let manager_addr = app
-        .cron_cat(deps.as_ref())
-        .query_manager_addr(env.contract.address, dca_id.clone())?;
+    let cron_cat = app.cron_cat(deps.as_ref());
+
+    let manager_addr = cron_cat.query_manager_addr(env.contract.address.clone(), dca_id.clone())?;
     if manager_addr != info.sender {
         return Err(AppError::NotManagerConvert {});
     }
+    let mut messages = vec![];
 
-    let dex = app.dex(deps.as_ref(), dca.dex);
+    // In case task running out of balance - refill it
+    let task_balance = cron_cat
+        .query_task_balance(env.contract.address, dca_id.clone())?
+        .balance
+        .unwrap();
+    if task_balance.native_balance < config.refill_threshold {
+        messages.push(
+            cron_cat.refill_task(
+                dca_id,
+                AssetList::from(vec![Asset::native(
+                    config.native_denom,
+                    config.dca_creation_amount,
+                )])
+                .into(),
+            )?,
+        );
+    }
+
     let offer_asset = OfferAsset {
         name: dca.source_asset.into(),
         amount: Uint128::new(100),
     };
-    let swap_msg = dex.swap(
+    // TODO: remove dca on failed swap?
+    messages.push(app.dex(deps.as_ref(), dca.dex).swap(
         offer_asset,
         dca.target_asset.into(),
         Some(Decimal::percent(30)),
         None,
-    )?;
-    Ok(app.tag_response(Response::new().add_message(swap_msg), "convert"))
+    )?);
+    Ok(app.tag_response(Response::new().add_messages(messages), "convert"))
 }

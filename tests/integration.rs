@@ -20,7 +20,7 @@ use croncat_integration_testing::DENOM;
 // Use prelude to get all the necessary imports
 use cw_orch::{anyhow, deploy::Deploy, prelude::*};
 
-use cosmwasm_std::{coin, coins, Addr, Decimal, Uint128};
+use cosmwasm_std::{coin, Addr, Decimal, Uint128};
 use wyndex_bundle::{EUR, USD};
 
 // consts for testing
@@ -28,6 +28,7 @@ const ADMIN: &str = "admin";
 const WYNDEX_WITHOUT_CHAIN: &str = "wyndex";
 
 /// Set up the test environment with the contract installed
+#[allow(clippy::type_complexity)]
 fn setup() -> anyhow::Result<(
     Mock,
     AbstractAccount<Mock>,
