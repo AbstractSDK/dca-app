@@ -3,18 +3,18 @@ use std::rc::Rc;
 
 use abstract_core::objects::UncheckedContractEntry;
 use abstract_core::{app::BaseInstantiateMsg, objects::gov_type::GovernanceDetails};
-use abstract_dca_app::msg::Frequency;
-use abstract_dca_app::state::Config;
+use abstract_dca_app::msg::{DCAResponse, Frequency};
+use abstract_dca_app::state::{Config, DCAEntry};
 use abstract_dca_app::{
     contract::{DCA_APP_ID, DCA_APP_VERSION},
     msg::{AppInstantiateMsg, ConfigResponse, InstantiateMsg},
     *,
 };
+use abstract_dex_adapter::interface::DexAdapter;
 use abstract_dex_adapter::msg::DexInstantiateMsg;
 use abstract_dex_adapter::EXCHANGE;
 use abstract_interface::{Abstract, AbstractAccount, AppDeployer, VCExecFns, *};
-use croncat_app::contract::CRONCAT_ID;
-use croncat_app::{CroncatApp, CRON_CAT_FACTORY};
+use croncat_app::{contract::CRONCAT_ID, AppQueryMsgFns, CroncatApp, CRON_CAT_FACTORY};
 use croncat_integration_testing::test_helpers::set_up_croncat_contracts;
 use croncat_integration_testing::DENOM;
 // Use prelude to get all the necessary imports
@@ -27,28 +27,51 @@ use wyndex_bundle::{EUR, USD};
 const ADMIN: &str = "admin";
 const WYNDEX_WITHOUT_CHAIN: &str = "wyndex";
 
+#[allow(unused)]
+struct CronCatAddrs {
+    factory: Addr,
+    manager: Addr,
+    tasks: Addr,
+    agents: Addr,
+}
+
+#[allow(unused)]
+struct DeployedApps {
+    dca_app: DCAApp<Mock>,
+    dex_adapter: DexAdapter<Mock>,
+    cron_cat_app: CroncatApp<Mock>,
+}
+
 /// Set up the test environment with the contract installed
 #[allow(clippy::type_complexity)]
 fn setup() -> anyhow::Result<(
     Mock,
     AbstractAccount<Mock>,
     Abstract<Mock>,
-    DCAApp<Mock>,
-    Addr,
+    DeployedApps,
+    CronCatAddrs,
 )> {
     // Create a sender
     let sender = Addr::unchecked(ADMIN);
     // Create the mock
     let mut mock = Mock::new(&sender);
-    let croncat = set_up_croncat_contracts(None);
-    mock.app = Rc::new(RefCell::new(croncat.app));
+    let cron_cat = set_up_croncat_contracts(None);
+    mock.app = Rc::new(RefCell::new(cron_cat.app));
+    let cron_cat_addrs = CronCatAddrs {
+        factory: cron_cat.factory,
+        manager: cron_cat.manager,
+        tasks: cron_cat.tasks,
+        agents: cron_cat.agents,
+    };
 
-    // Construct the counter interface
-    let mut contract = DCAApp::new(DCA_APP_ID, mock.clone());
+    // Construct the DCA interface
+    let mut dca_app = DCAApp::new(DCA_APP_ID, mock.clone());
 
     // Deploy Abstract to the mock
     let abstr_deployment = Abstract::deploy_on(mock.clone(), Empty {})?;
+    // Deploy wyndex to the mock
     let _wyndex = wyndex_bundle::WynDex::deploy_on(mock.clone(), Empty {})?;
+    // Deploy dex adapter to the mock
     let dex_adapter = abstract_dex_adapter::interface::DexAdapter::new(EXCHANGE, mock.clone());
 
     dex_adapter.deploy(
@@ -59,7 +82,7 @@ fn setup() -> anyhow::Result<(
         },
     )?;
 
-    let mut croncat_contract = CroncatApp::new(CRONCAT_ID, mock.clone());
+    let mut cron_cat_app = CroncatApp::new(CRONCAT_ID, mock.clone());
     // Create account for croncat namespace
     abstr_deployment
         .account_factory
@@ -69,13 +92,13 @@ fn setup() -> anyhow::Result<(
     abstr_deployment
         .version_control
         .claim_namespaces(1, vec!["croncat".to_string()])?;
-    croncat_contract.deploy(croncat_app::contract::CRONCAT_MODULE_VERSION.parse()?)?;
+    cron_cat_app.deploy(croncat_app::contract::CRONCAT_MODULE_VERSION.parse()?)?;
 
     // Register factory entry
     let factory_entry = UncheckedContractEntry::try_from(CRON_CAT_FACTORY.to_owned())?;
     abstr_deployment.ans_host.execute(
         &abstract_core::ans_host::ExecuteMsg::UpdateContractAddresses {
-            to_add: vec![(factory_entry, croncat.factory.to_string())],
+            to_add: vec![(factory_entry, cron_cat_addrs.factory.to_string())],
             to_remove: vec![],
         },
         None,
@@ -104,12 +127,12 @@ fn setup() -> anyhow::Result<(
         None,
     )?;
     let module_addr = account.manager.module_info(CRONCAT_ID)?.unwrap().address;
-    croncat_contract.set_address(&module_addr);
+    cron_cat_app.set_address(&module_addr);
     let manager_addr = account.manager.address()?;
-    croncat_contract.set_sender(&manager_addr);
+    cron_cat_app.set_sender(&manager_addr);
 
     // Install DCA
-    contract.deploy(DCA_APP_VERSION.parse()?)?;
+    dca_app.deploy(DCA_APP_VERSION.parse()?)?;
     account.install_module(
         DCA_APP_ID,
         &InstantiateMsg {
@@ -126,28 +149,39 @@ fn setup() -> anyhow::Result<(
     )?;
 
     let module_addr = account.manager.module_info(DCA_APP_ID)?.unwrap().address;
-    contract.set_address(&module_addr);
+    dca_app.set_address(&module_addr);
     account.manager.update_adapter_authorized_addresses(
         EXCHANGE,
         vec![module_addr.to_string()],
         vec![],
     )?;
 
-    contract.set_sender(&manager_addr);
+    dca_app.set_sender(&manager_addr);
     mock.set_balance(
         &account.proxy.address()?,
         vec![coin(50_000_000, DENOM), coin(10_000, EUR)],
     )?;
 
-    Ok((mock, account, abstr_deployment, contract, croncat.manager))
+    let deployed_apps = DeployedApps {
+        dca_app,
+        dex_adapter,
+        cron_cat_app,
+    };
+    Ok((
+        mock,
+        account,
+        abstr_deployment,
+        deployed_apps,
+        cron_cat_addrs,
+    ))
 }
 
 #[test]
 fn successful_install() -> anyhow::Result<()> {
     // Set up the environment and contract
-    let (mock, account, _abstr, mut app, manager_addr) = setup()?;
+    let (_mock, _account, _abstr, apps, _manager_addr) = setup()?;
 
-    let config: ConfigResponse = app.config()?;
+    let config: ConfigResponse = apps.dca_app.config()?;
     assert_eq!(
         config,
         ConfigResponse {
@@ -158,22 +192,174 @@ fn successful_install() -> anyhow::Result<()> {
             }
         }
     );
-    app.create_dca(
+    Ok(())
+}
+
+#[test]
+fn successful_swaps() -> anyhow::Result<()> {
+    let (mock, account, _abstr, mut apps, croncat_addrs) = setup()?;
+
+    // create 2 dcas
+    apps.dca_app.create_dca(
+        WYNDEX_WITHOUT_CHAIN.to_owned(),
+        Frequency::EveryNBlocks(1),
+        EUR.to_owned(),
+        USD.to_owned(),
+    )?;
+    apps.dca_app.create_dca(
+        WYNDEX_WITHOUT_CHAIN.to_owned(),
+        Frequency::EveryNBlocks(2),
+        EUR.to_owned(),
+        USD.to_owned(),
+    )?;
+
+    // First dca
+    let dca = apps.dca_app.dca("dca_1".to_owned())?;
+    assert_eq!(
+        dca,
+        DCAResponse {
+            dca: Some(DCAEntry {
+                source_asset: EUR.to_owned(),
+                target_asset: USD.to_owned(),
+                frequency: Frequency::EveryNBlocks(1),
+                dex: WYNDEX_WITHOUT_CHAIN.to_owned()
+            })
+        }
+    );
+
+    // Second dca
+    let dca = apps.dca_app.dca("dca_2".to_owned())?;
+    assert_eq!(
+        dca,
+        DCAResponse {
+            dca: Some(DCAEntry {
+                source_asset: EUR.to_owned(),
+                target_asset: USD.to_owned(),
+                frequency: Frequency::EveryNBlocks(2),
+                dex: WYNDEX_WITHOUT_CHAIN.to_owned()
+            })
+        }
+    );
+
+    // Only manager should be able to execute this one
+    apps.dca_app.set_sender(&croncat_addrs.manager);
+
+    apps.dca_app.convert("dca_1".to_owned())?;
+
+    let usd_balance = mock.query_balance(&account.proxy.address()?, USD)?;
+    assert_eq!(usd_balance, Uint128::new(98));
+    let eur_balance = mock.query_balance(&account.proxy.address()?, EUR)?;
+    assert_eq!(eur_balance, Uint128::new(9900));
+
+    apps.dca_app.convert("dca_2".to_owned())?;
+
+    let usd_balance = mock.query_balance(&account.proxy.address()?, USD)?;
+    assert_eq!(usd_balance, Uint128::new(194));
+    let eur_balance = mock.query_balance(&account.proxy.address()?, EUR)?;
+    assert_eq!(eur_balance, Uint128::new(9800));
+
+    Ok(())
+}
+
+#[test]
+fn update_dca() -> anyhow::Result<()> {
+    let (_mock, _account, _abstr, apps, _croncat_addrs) = setup()?;
+
+    // create dca
+    apps.dca_app.create_dca(
         WYNDEX_WITHOUT_CHAIN.to_owned(),
         Frequency::EveryNBlocks(1),
         EUR.to_owned(),
         USD.to_owned(),
     )?;
 
-    // Only manager should be able to execute this one
-    app.set_sender(&manager_addr);
+    let task_hash_before_update = apps
+        .cron_cat_app
+        .task_info(apps.dca_app.addr_str()?, "dca_1".to_owned())?
+        .task
+        .unwrap()
+        .task_hash;
 
-    app.convert("dca_1".to_owned())?;
+    apps.dca_app.update_dca(
+        "dca_1".to_owned(),
+        Some("new_dex".to_owned()),
+        Some(Frequency::EveryNBlocks(3)),
+        Some("new_source".to_owned()),
+        Some("new_target".to_owned()),
+    )?;
 
-    let usd_balance = mock.query_balance(&account.proxy.address()?, USD)?;
-    assert_eq!(usd_balance, Uint128::new(98));
-    let eur_balance = mock.query_balance(&account.proxy.address()?, EUR)?;
-    assert_eq!(eur_balance, Uint128::new(9900));
+    let dca = apps.dca_app.dca("dca_1".to_owned())?;
+    assert_eq!(
+        dca,
+        DCAResponse {
+            dca: Some(DCAEntry {
+                source_asset: "new_source".to_owned(),
+                target_asset: "new_target".to_owned(),
+                frequency: Frequency::EveryNBlocks(3),
+                dex: "new_dex".to_owned()
+            })
+        }
+    );
+
+    let task_hash_after_update = apps
+        .cron_cat_app
+        .task_info(apps.dca_app.addr_str()?, "dca_1".to_owned())?
+        .task
+        .unwrap()
+        .task_hash;
+
+    assert_ne!(task_hash_before_update, task_hash_after_update);
+
+    // Now without updating frequency
+    apps.dca_app.update_dca(
+        "dca_1".to_owned(),
+        None,
+        None,
+        Some("new_source_v2".to_owned()),
+        None,
+    )?;
+
+    let dca = apps.dca_app.dca("dca_1".to_owned())?;
+    assert_eq!(
+        dca,
+        DCAResponse {
+            dca: Some(DCAEntry {
+                source_asset: "new_source_v2".to_owned(),
+                target_asset: "new_target".to_owned(),
+                frequency: Frequency::EveryNBlocks(3),
+                dex: "new_dex".to_owned()
+            })
+        }
+    );
+
+    let task_hash_after_second_update = apps
+        .cron_cat_app
+        .task_info(apps.dca_app.addr_str()?, "dca_1".to_owned())?
+        .task
+        .unwrap()
+        .task_hash;
+
+    assert_eq!(task_hash_after_update, task_hash_after_second_update);
+
+    Ok(())
+}
+
+#[test]
+fn cancel_dca() -> anyhow::Result<()> {
+    let (_mock, _account, _abstr, apps, _croncat_addrs) = setup()?;
+
+    // create dca
+    apps.dca_app.create_dca(
+        WYNDEX_WITHOUT_CHAIN.to_owned(),
+        Frequency::EveryNBlocks(1),
+        EUR.to_owned(),
+        USD.to_owned(),
+    )?;
+
+    apps.dca_app.cancel_dca("dca_1".to_owned())?;
+
+    let dca = apps.dca_app.dca("dca_1".to_owned())?;
+    assert_eq!(dca, DCAResponse { dca: None });
 
     Ok(())
 }
