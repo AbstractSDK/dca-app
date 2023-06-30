@@ -1,12 +1,12 @@
 use crate::contract::{AppResult, DCAApp};
-use crate::msg::{AppQueryMsg, ConfigResponse, DCAResponse};
+use crate::msg::{DCAQueryMsg, ConfigResponse, DCAResponse};
 use crate::state::{CONFIG, DCA_LIST};
 use cosmwasm_std::{to_binary, Binary, Deps, Env, StdResult};
 
-pub fn query_handler(deps: Deps, _env: Env, _app: &DCAApp, msg: AppQueryMsg) -> AppResult<Binary> {
+pub fn query_handler(deps: Deps, _env: Env, _app: &DCAApp, msg: DCAQueryMsg) -> AppResult<Binary> {
     match msg {
-        AppQueryMsg::Config {} => to_binary(&query_config(deps)?),
-        AppQueryMsg::DCA { dca_id } => to_binary(&query_dca(deps, dca_id)?),
+        DCAQueryMsg::Config {} => to_binary(&query_config(deps)?),
+        DCAQueryMsg::DCA { dca_id } => to_binary(&query_dca(deps, dca_id)?),
     }
     .map_err(Into::into)
 }

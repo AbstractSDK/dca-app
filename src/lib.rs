@@ -8,4 +8,4 @@ pub mod state;
 #[cfg(feature = "interface")]
 pub use contract::interface::DCAApp;
 #[cfg(feature = "interface")]
-pub use msg::{AppExecuteMsgFns, AppQueryMsgFns};
+pub use msg::{DCAExecuteMsgFns, DCAQueryMsgFns};

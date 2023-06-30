@@ -28,7 +28,4 @@ pub enum AppError {
 
     #[error("Convert can be called only by the croncat manager")]
     NotManagerConvert {},
-
-    #[error("No dca by this Id")]
-    DcaNotFound {},
 }

@@ -17,7 +17,7 @@ use crate::{
 
 // impl app::AppExecuteMsg for AppExecuteMsg {}
 // impl app::AppQueryMsg for AppQueryMsg {}
-abstract_app::app_messages!(DCAApp, AppExecuteMsg, AppQueryMsg);
+abstract_app::app_messages!(DCAApp, DCAExecuteMsg, DCAQueryMsg);
 
 #[cosmwasm_schema::cw_serde]
 #[derive(Copy)]
@@ -49,8 +49,12 @@ pub struct AppInstantiateMsg {
 #[cosmwasm_schema::cw_serde]
 #[cfg_attr(feature = "interface", derive(cw_orch::ExecuteFns))]
 #[cfg_attr(feature = "interface", impl_into(ExecuteMsg))]
-pub enum AppExecuteMsg {
-    UpdateConfig {},
+pub enum DCAExecuteMsg {
+    UpdateConfig {
+        new_native_denom: Option<String>,
+        new_dca_creation_amount: Option<Uint128>,
+        new_refill_threshold: Option<Uint128>,
+    },
     /// Used to create a new DCA
     CreateDCA {
         /// The name of the asset to be used for purchasing
@@ -91,7 +95,7 @@ pub enum AppExecuteMsg {
 #[cfg_attr(feature = "interface", derive(cw_orch::QueryFns))]
 #[cfg_attr(feature = "interface", impl_into(QueryMsg))]
 #[derive(QueryResponses)]
-pub enum AppQueryMsg {
+pub enum DCAQueryMsg {
     #[returns(ConfigResponse)]
     Config {},
     #[returns(DCAResponse)]

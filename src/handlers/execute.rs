@@ -10,67 +10,12 @@ use cw_asset::{Asset, AssetList};
 use crate::contract::{AppResult, DCAApp};
 
 use crate::error::AppError;
-use crate::msg::{AppExecuteMsg, ExecuteMsg, Frequency};
+use crate::msg::{DCAExecuteMsg, ExecuteMsg, Frequency};
 use crate::state::{Config, DCAEntry, CONFIG, DCA_LIST, NEXT_ID};
 use abstract_dex_adapter::api::DexInterface;
 use abstract_sdk::AbstractSdkResult;
 use croncat_app::croncat_integration_utils::{CronCatAction, CronCatTaskRequest};
 use croncat_app::{CronCat, CronCatInterface};
-
-pub fn execute_handler(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    app: DCAApp,
-    msg: AppExecuteMsg,
-) -> AppResult {
-    match msg {
-        AppExecuteMsg::UpdateConfig {} => update_config(deps, info, app),
-        AppExecuteMsg::CreateDCA {
-            source_asset,
-            target_asset,
-            frequency,
-            dex,
-        } => create_dca(
-            deps,
-            env,
-            info,
-            app,
-            source_asset,
-            target_asset,
-            frequency,
-            dex,
-        ),
-        AppExecuteMsg::UpdateDCA {
-            dca_id,
-            new_source_asset,
-            new_target_asset,
-            new_frequency,
-            new_dex,
-        } => update_dca(
-            deps,
-            env,
-            info,
-            app,
-            dca_id,
-            new_source_asset,
-            new_target_asset,
-            new_frequency,
-            new_dex,
-        ),
-        AppExecuteMsg::CancelDCA { dca_id } => cancel_dca(deps, info, app, dca_id),
-        AppExecuteMsg::Convert { dca_id } => convert(deps, env, info, app, dca_id),
-    }
-}
-
-/// Update the configuration of the app
-fn update_config(deps: DepsMut, msg_info: MessageInfo, app: DCAApp) -> AppResult {
-    // Only the admin should be able to call this
-    app.admin.assert_admin(deps.as_ref(), &msg_info.sender)?;
-    let mut _config = CONFIG.load(deps.storage)?;
-
-    Ok(app.tag_response(Response::default(), "update_config"))
-}
 
 /// Helper to for task creation message
 fn create_convert_task_internal(
@@ -89,7 +34,7 @@ fn create_convert_task_internal(
         actions: vec![CronCatAction {
             msg: wasm_execute(
                 env.contract.address,
-                &ExecuteMsg::from(AppExecuteMsg::Convert {
+                &ExecuteMsg::from(DCAExecuteMsg::Convert {
                     dca_id: dca_id.clone(),
                 }),
                 vec![],
@@ -107,6 +52,88 @@ fn create_convert_task_internal(
     )])
     .into();
     cron_cat.create_task(task, dca_id, assets)
+}
+
+pub fn execute_handler(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    app: DCAApp,
+    msg: DCAExecuteMsg,
+) -> AppResult {
+    match msg {
+        DCAExecuteMsg::UpdateConfig {
+            new_native_denom,
+            new_dca_creation_amount,
+            new_refill_threshold,
+        } => update_config(
+            deps,
+            info,
+            app,
+            new_native_denom,
+            new_dca_creation_amount,
+            new_refill_threshold,
+        ),
+        DCAExecuteMsg::CreateDCA {
+            source_asset,
+            target_asset,
+            frequency,
+            dex,
+        } => create_dca(
+            deps,
+            env,
+            info,
+            app,
+            source_asset,
+            target_asset,
+            frequency,
+            dex,
+        ),
+        DCAExecuteMsg::UpdateDCA {
+            dca_id,
+            new_source_asset,
+            new_target_asset,
+            new_frequency,
+            new_dex,
+        } => update_dca(
+            deps,
+            env,
+            info,
+            app,
+            dca_id,
+            new_source_asset,
+            new_target_asset,
+            new_frequency,
+            new_dex,
+        ),
+        DCAExecuteMsg::CancelDCA { dca_id } => cancel_dca(deps, info, app, dca_id),
+        DCAExecuteMsg::Convert { dca_id } => convert(deps, env, info, app, dca_id),
+    }
+}
+
+/// Update the configuration of the app
+fn update_config(
+    deps: DepsMut,
+    msg_info: MessageInfo,
+    app: DCAApp,
+    new_native_denom: Option<String>,
+    new_dca_creation_amount: Option<Uint128>,
+    new_refill_threshold: Option<Uint128>,
+) -> AppResult {
+    // Only the admin should be able to call this
+    app.admin.assert_admin(deps.as_ref(), &msg_info.sender)?;
+    let old_config = CONFIG.load(deps.storage)?;
+
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            native_denom: new_native_denom.unwrap_or(old_config.native_denom),
+            dca_creation_amount: new_dca_creation_amount.unwrap_or(old_config.dca_creation_amount),
+            refill_threshold: new_refill_threshold.unwrap_or(old_config.refill_threshold),
+        },
+    )?;
+
+    Ok(app.tag_response(Response::default(), "update_config"))
 }
 
 /// Create new DCA
@@ -165,22 +192,21 @@ fn update_dca(
     // Only if frequency is changed we have to re-create a task
     let recreate_task = new_frequency.is_some();
 
-    let dca = DCA_LIST.update(deps.storage, dca_id.clone(), |dca| {
-        let old_dca = dca.ok_or(AppError::DcaNotFound {})?;
-        let new_dca = DCAEntry {
-            source_asset: new_source_asset.unwrap_or(old_dca.source_asset),
-            target_asset: new_target_asset.unwrap_or(old_dca.target_asset),
-            frequency: new_frequency.unwrap_or(old_dca.frequency),
-            dex: new_dex.unwrap_or(old_dca.dex),
-        };
-        AppResult::Ok(new_dca)
-    })?;
+    let old_dca = DCA_LIST.load(deps.storage, dca_id.clone())?;
+    let new_dca = DCAEntry {
+        source_asset: new_source_asset.unwrap_or(old_dca.source_asset),
+        target_asset: new_target_asset.unwrap_or(old_dca.target_asset),
+        frequency: new_frequency.unwrap_or(old_dca.frequency),
+        dex: new_dex.unwrap_or(old_dca.dex),
+    };
+
+    DCA_LIST.save(deps.storage, dca_id.clone(), &new_dca)?;
 
     let response = if recreate_task {
         let config = CONFIG.load(deps.storage)?;
         let cron_cat = app.cron_cat(deps.as_ref());
         let remove_task_msg = cron_cat.remove_task(dca_id.clone())?;
-        let create_task_msg = create_convert_task_internal(env, dca, dca_id, cron_cat, config)?;
+        let create_task_msg = create_convert_task_internal(env, new_dca, dca_id, cron_cat, config)?;
         Response::new().add_messages(vec![remove_task_msg, create_task_msg])
     } else {
         Response::new()
