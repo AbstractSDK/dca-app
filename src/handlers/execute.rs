@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+use abstract_core::objects::{AssetEntry, DexName};
 use abstract_dex_adapter::msg::OfferAsset;
 use abstract_sdk::features::AbstractResponse;
 use cosmwasm_std::{
@@ -66,6 +67,7 @@ pub fn execute_handler(
             new_native_denom,
             new_dca_creation_amount,
             new_refill_threshold,
+            new_max_spread,
         } => update_config(
             deps,
             info,
@@ -73,6 +75,7 @@ pub fn execute_handler(
             new_native_denom,
             new_dca_creation_amount,
             new_refill_threshold,
+            new_max_spread,
         ),
         DCAExecuteMsg::CreateDCA {
             source_asset,
@@ -119,6 +122,7 @@ fn update_config(
     new_native_denom: Option<String>,
     new_dca_creation_amount: Option<Uint128>,
     new_refill_threshold: Option<Uint128>,
+    new_max_spread: Option<Decimal>,
 ) -> AppResult {
     // Only the admin should be able to call this
     app.admin.assert_admin(deps.as_ref(), &msg_info.sender)?;
@@ -130,6 +134,7 @@ fn update_config(
             native_denom: new_native_denom.unwrap_or(old_config.native_denom),
             dca_creation_amount: new_dca_creation_amount.unwrap_or(old_config.dca_creation_amount),
             refill_threshold: new_refill_threshold.unwrap_or(old_config.refill_threshold),
+            max_spread: new_max_spread.unwrap_or(old_config.max_spread),
         },
     )?;
 
@@ -142,15 +147,19 @@ fn create_dca(
     env: Env,
     info: MessageInfo,
     app: DCAApp,
-    source_asset: String,
-    target_asset: String,
+    source_asset: OfferAsset,
+    target_asset: AssetEntry,
     frequency: Frequency,
-    dex_name: String,
+    dex_name: DexName,
 ) -> AppResult {
     // Only the admin should be able to create dca
     app.admin.assert_admin(deps.as_ref(), &info.sender)?;
 
     let config = CONFIG.load(deps.storage)?;
+
+    // Simulate swap first
+    app.dex(deps.as_ref(), dex_name.clone())
+        .simulate_swap(source_asset.clone(), target_asset.clone())?;
 
     // Generate DCA ID
     let id = NEXT_ID.update(deps.storage, |id| AppResult::Ok(id + 1))?;
@@ -182,10 +191,10 @@ fn update_dca(
     info: MessageInfo,
     app: DCAApp,
     dca_id: String,
-    new_source_asset: Option<String>,
-    new_target_asset: Option<String>,
+    new_source_asset: Option<OfferAsset>,
+    new_target_asset: Option<AssetEntry>,
     new_frequency: Option<Frequency>,
-    new_dex: Option<String>,
+    new_dex: Option<DexName>,
 ) -> AppResult {
     app.admin.assert_admin(deps.as_ref(), &info.sender)?;
 
@@ -199,6 +208,10 @@ fn update_dca(
         frequency: new_frequency.unwrap_or(old_dca.frequency),
         dex: new_dex.unwrap_or(old_dca.dex),
     };
+
+    // Simulate swap for a new dca
+    app.dex(deps.as_ref(), new_dca.dex.clone())
+        .simulate_swap(new_dca.source_asset.clone(), new_dca.target_asset.clone())?;
 
     DCA_LIST.save(deps.storage, dca_id.clone(), &new_dca)?;
 
@@ -258,16 +271,12 @@ fn convert(deps: DepsMut, env: Env, info: MessageInfo, app: DCAApp, dca_id: Stri
         );
     }
 
-    let offer_asset = OfferAsset {
-        name: dca.source_asset.into(),
-        amount: Uint128::new(100),
-    };
     // TODO: remove dca on failed swap?
     // Or `stop_on_fail` should be enough
     messages.push(app.dex(deps.as_ref(), dca.dex).swap(
-        offer_asset,
-        dca.target_asset.into(),
-        Some(Decimal::percent(30)),
+        dca.source_asset,
+        dca.target_asset,
+        Some(config.max_spread),
         None,
     )?);
     Ok(app.tag_response(Response::new().add_messages(messages), "convert"))

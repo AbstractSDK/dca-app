@@ -1,5 +1,7 @@
+use abstract_core::objects::{AssetEntry, DexName, PoolReference};
+use abstract_dex_adapter::msg::OfferAsset;
 use cosmwasm_schema::QueryResponses;
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Decimal, Uint128};
 use croncat_app::croncat_integration_utils::CronCatInterval;
 
 use crate::{
@@ -20,20 +22,19 @@ use crate::{
 abstract_app::app_messages!(DCAApp, DCAExecuteMsg, DCAQueryMsg);
 
 #[cosmwasm_schema::cw_serde]
-#[derive(Copy)]
 #[non_exhaustive]
 pub enum Frequency {
     /// Blocks will schedule the next DCA purchase every `n` blocks.
     EveryNBlocks(u64),
-    /// Time will schedule the next DCA purchase after every `n` seconds.
-    EveryNSeconds(u64),
+    /// Time will schedule the next DCA purchase using crontab.
+    Cron(String),
 }
 
 impl Frequency {
     pub fn to_interval(self) -> CronCatInterval {
         match self {
             Frequency::EveryNBlocks(blocks) => CronCatInterval::Block(blocks),
-            Frequency::EveryNSeconds(_) => todo!(),
+            Frequency::Cron(cron_tab) => CronCatInterval::Cron(cron_tab),
         }
     }
 }
@@ -43,6 +44,7 @@ pub struct AppInstantiateMsg {
     pub native_denom: String,
     pub dca_creation_amount: Uint128,
     pub refill_threshold: Uint128,
+    pub max_spread: Decimal,
 }
 
 /// App execute messages
@@ -54,31 +56,32 @@ pub enum DCAExecuteMsg {
         new_native_denom: Option<String>,
         new_dca_creation_amount: Option<Uint128>,
         new_refill_threshold: Option<Uint128>,
+        new_max_spread: Option<Decimal>,
     },
     /// Used to create a new DCA
     CreateDCA {
         /// The name of the asset to be used for purchasing
-        source_asset: String,
+        source_asset: OfferAsset,
         /// The name of the asset to be purchased
-        target_asset: String,
+        target_asset: AssetEntry,
         /// The frequency of purchase
         frequency: Frequency,
         /// The DEX to be used for the swap
-        dex: String,
+        dex: DexName,
     },
-
+    // MultipleCreateDcas
     /// Used to update an existing DCA
     UpdateDCA {
         /// Unique identifier for the DCA
         dca_id: String,
         /// Optional new name of the asset to be used for purchasing
-        new_source_asset: Option<String>,
+        new_source_asset: Option<OfferAsset>,
         /// Optional new name of the asset to be purchased
-        new_target_asset: Option<String>,
+        new_target_asset: Option<AssetEntry>,
         /// Optional new frequency of purchase
         new_frequency: Option<Frequency>,
         /// Optional new DEX to be used for the swap
-        new_dex: Option<String>,
+        new_dex: Option<DexName>,
     },
 
     /// Used to cancel an existing DCA
@@ -113,4 +116,5 @@ pub struct ConfigResponse {
 #[cosmwasm_schema::cw_serde]
 pub struct DCAResponse {
     pub dca: Option<DCAEntry>,
+    pub pool_references: Vec<PoolReference>,
 }

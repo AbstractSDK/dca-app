@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use abstract_core::objects::UncheckedContractEntry;
+use abstract_core::objects::{
+    AssetEntry, PoolAddress, PoolReference, UncheckedContractEntry, UniquePoolId,
+};
 use abstract_core::{app::BaseInstantiateMsg, objects::gov_type::GovernanceDetails};
 use abstract_dca_app::msg::{DCAResponse, Frequency};
 use abstract_dca_app::state::{Config, DCAEntry};
@@ -11,7 +13,7 @@ use abstract_dca_app::{
     *,
 };
 use abstract_dex_adapter::interface::DexAdapter;
-use abstract_dex_adapter::msg::DexInstantiateMsg;
+use abstract_dex_adapter::msg::{DexInstantiateMsg, OfferAsset};
 use abstract_dex_adapter::EXCHANGE;
 use abstract_interface::{Abstract, AbstractAccount, AppDeployer, VCExecFns, *};
 use croncat_app::{contract::CRONCAT_ID, AppQueryMsgFns, CroncatApp, CRON_CAT_FACTORY};
@@ -21,7 +23,7 @@ use croncat_integration_testing::DENOM;
 use cw_orch::{anyhow, deploy::Deploy, prelude::*};
 
 use cosmwasm_std::{coin, Addr, Decimal, Uint128};
-use wyndex_bundle::{EUR, USD};
+use wyndex_bundle::{WynDex, EUR, USD};
 
 // consts for testing
 const ADMIN: &str = "admin";
@@ -40,6 +42,7 @@ struct DeployedApps {
     dca_app: DCAApp<Mock>,
     dex_adapter: DexAdapter<Mock>,
     cron_cat_app: CroncatApp<Mock>,
+    wyndex: WynDex,
 }
 
 /// Set up the test environment with the contract installed
@@ -70,7 +73,7 @@ fn setup() -> anyhow::Result<(
     // Deploy Abstract to the mock
     let abstr_deployment = Abstract::deploy_on(mock.clone(), Empty {})?;
     // Deploy wyndex to the mock
-    let _wyndex = wyndex_bundle::WynDex::deploy_on(mock.clone(), Empty {})?;
+    let wyndex = wyndex_bundle::WynDex::deploy_on(mock.clone(), Empty {})?;
     // Deploy dex adapter to the mock
     let dex_adapter = abstract_dex_adapter::interface::DexAdapter::new(EXCHANGE, mock.clone());
 
@@ -143,6 +146,7 @@ fn setup() -> anyhow::Result<(
                 native_denom: DENOM.to_owned(),
                 dca_creation_amount: Uint128::new(5_000_000),
                 refill_threshold: Uint128::new(1_000_000),
+                max_spread: Decimal::percent(30),
             },
         },
         None,
@@ -166,6 +170,7 @@ fn setup() -> anyhow::Result<(
         dca_app,
         dex_adapter,
         cron_cat_app,
+        wyndex,
     };
     Ok((
         mock,
@@ -188,7 +193,8 @@ fn successful_install() -> anyhow::Result<()> {
             config: Config {
                 native_denom: DENOM.to_owned(),
                 dca_creation_amount: Uint128::new(5_000_000),
-                refill_threshold: Uint128::new(1_000_000)
+                refill_threshold: Uint128::new(1_000_000),
+                max_spread: Decimal::percent(30),
             }
         }
     );
@@ -203,14 +209,14 @@ fn successful_swaps() -> anyhow::Result<()> {
     apps.dca_app.create_dca(
         WYNDEX_WITHOUT_CHAIN.to_owned(),
         Frequency::EveryNBlocks(1),
-        EUR.to_owned(),
-        USD.to_owned(),
+        OfferAsset::new(EUR, 100_u128),
+        USD.into(),
     )?;
     apps.dca_app.create_dca(
         WYNDEX_WITHOUT_CHAIN.to_owned(),
         Frequency::EveryNBlocks(2),
-        EUR.to_owned(),
-        USD.to_owned(),
+        OfferAsset::new(EUR, 250_u128),
+        USD.into(),
     )?;
 
     // First dca
@@ -219,11 +225,15 @@ fn successful_swaps() -> anyhow::Result<()> {
         dca,
         DCAResponse {
             dca: Some(DCAEntry {
-                source_asset: EUR.to_owned(),
-                target_asset: USD.to_owned(),
+                source_asset: OfferAsset::new(EUR, 100_u128),
+                target_asset: USD.into(),
                 frequency: Frequency::EveryNBlocks(1),
                 dex: WYNDEX_WITHOUT_CHAIN.to_owned()
-            })
+            }),
+            pool_references: vec![PoolReference::new(
+                UniquePoolId::new(1),
+                PoolAddress::contract(apps.wyndex.eur_usd_pair.clone())
+            )],
         }
     );
 
@@ -233,11 +243,15 @@ fn successful_swaps() -> anyhow::Result<()> {
         dca,
         DCAResponse {
             dca: Some(DCAEntry {
-                source_asset: EUR.to_owned(),
-                target_asset: USD.to_owned(),
+                source_asset: OfferAsset::new(EUR, 250_u128),
+                target_asset: USD.into(),
                 frequency: Frequency::EveryNBlocks(2),
                 dex: WYNDEX_WITHOUT_CHAIN.to_owned()
-            })
+            }),
+            pool_references: vec![PoolReference::new(
+                UniquePoolId::new(1),
+                PoolAddress::contract(apps.wyndex.eur_usd_pair)
+            )],
         }
     );
 
@@ -254,9 +268,9 @@ fn successful_swaps() -> anyhow::Result<()> {
     apps.dca_app.convert("dca_2".to_owned())?;
 
     let usd_balance = mock.query_balance(&account.proxy.address()?, USD)?;
-    assert_eq!(usd_balance, Uint128::new(194));
+    assert_eq!(usd_balance, Uint128::new(335));
     let eur_balance = mock.query_balance(&account.proxy.address()?, EUR)?;
-    assert_eq!(eur_balance, Uint128::new(9800));
+    assert_eq!(eur_balance, Uint128::new(9650));
 
     Ok(())
 }
@@ -269,8 +283,8 @@ fn update_dca() -> anyhow::Result<()> {
     apps.dca_app.create_dca(
         WYNDEX_WITHOUT_CHAIN.to_owned(),
         Frequency::EveryNBlocks(1),
-        EUR.to_owned(),
-        USD.to_owned(),
+        OfferAsset::new(EUR, 150_u128),
+        USD.into(),
     )?;
 
     let task_hash_before_update = apps
@@ -282,10 +296,10 @@ fn update_dca() -> anyhow::Result<()> {
 
     apps.dca_app.update_dca(
         "dca_1".to_owned(),
-        Some("new_dex".to_owned()),
+        Some(WYNDEX_WITHOUT_CHAIN.into()),
         Some(Frequency::EveryNBlocks(3)),
-        Some("new_source".to_owned()),
-        Some("new_target".to_owned()),
+        Some(OfferAsset::new(USD, 200_u128)),
+        Some(EUR.into()),
     )?;
 
     let dca = apps.dca_app.dca("dca_1".to_owned())?;
@@ -293,11 +307,15 @@ fn update_dca() -> anyhow::Result<()> {
         dca,
         DCAResponse {
             dca: Some(DCAEntry {
-                source_asset: "new_source".to_owned(),
-                target_asset: "new_target".to_owned(),
+                source_asset: OfferAsset::new(USD, 200_u128),
+                target_asset: EUR.into(),
                 frequency: Frequency::EveryNBlocks(3),
-                dex: "new_dex".to_owned()
-            })
+                dex: WYNDEX_WITHOUT_CHAIN.to_owned()
+            }),
+            pool_references: vec![PoolReference::new(
+                UniquePoolId::new(1),
+                PoolAddress::contract(apps.wyndex.eur_usd_pair.clone())
+            )],
         }
     );
 
@@ -315,7 +333,7 @@ fn update_dca() -> anyhow::Result<()> {
         "dca_1".to_owned(),
         None,
         None,
-        Some("new_source_v2".to_owned()),
+        Some(OfferAsset::new(USD, 250_u128)),
         None,
     )?;
 
@@ -324,11 +342,15 @@ fn update_dca() -> anyhow::Result<()> {
         dca,
         DCAResponse {
             dca: Some(DCAEntry {
-                source_asset: "new_source_v2".to_owned(),
-                target_asset: "new_target".to_owned(),
+                source_asset: OfferAsset::new(USD, 250_u128),
+                target_asset: AssetEntry::new(EUR),
                 frequency: Frequency::EveryNBlocks(3),
-                dex: "new_dex".to_owned()
-            })
+                dex: WYNDEX_WITHOUT_CHAIN.to_owned()
+            }),
+            pool_references: vec![PoolReference::new(
+                UniquePoolId::new(1),
+                PoolAddress::contract(apps.wyndex.eur_usd_pair)
+            )],
         }
     );
 
@@ -352,14 +374,20 @@ fn cancel_dca() -> anyhow::Result<()> {
     apps.dca_app.create_dca(
         WYNDEX_WITHOUT_CHAIN.to_owned(),
         Frequency::EveryNBlocks(1),
-        EUR.to_owned(),
-        USD.to_owned(),
+        OfferAsset::new(EUR, 100_u128),
+        USD.into(),
     )?;
 
     apps.dca_app.cancel_dca("dca_1".to_owned())?;
 
     let dca = apps.dca_app.dca("dca_1".to_owned())?;
-    assert_eq!(dca, DCAResponse { dca: None });
+    assert_eq!(
+        dca,
+        DCAResponse {
+            dca: None,
+            pool_references: vec![]
+        }
+    );
 
     Ok(())
 }

@@ -15,6 +15,7 @@ pub fn instantiate_handler(
         native_denom: msg.native_denom,
         dca_creation_amount: msg.dca_creation_amount,
         refill_threshold: msg.refill_threshold,
+        max_spread: msg.max_spread,
     };
 
     CONFIG.save(deps.storage, &config)?;
