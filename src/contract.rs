@@ -2,7 +2,7 @@ use crate::msg::AppMigrateMsg;
 use crate::{
     error::AppError,
     handlers,
-    msg::{DCAExecuteMsg, AppInstantiateMsg, DCAQueryMsg},
+    msg::{AppInstantiateMsg, DCAExecuteMsg, DCAQueryMsg},
     replies::{self, INSTANTIATE_REPLY_ID},
 };
 use abstract_app::AppContract;

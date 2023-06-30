@@ -1,5 +1,5 @@
 use crate::contract::{AppResult, DCAApp};
-use crate::msg::{DCAQueryMsg, ConfigResponse, DCAResponse};
+use crate::msg::{ConfigResponse, DCAQueryMsg, DCAResponse};
 use crate::state::{CONFIG, DCA_LIST};
 use cosmwasm_std::{to_binary, Binary, Deps, Env, StdResult};
 
