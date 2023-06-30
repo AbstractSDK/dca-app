@@ -16,6 +16,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse { config })
 }
 
+/// Get dca
 fn query_dca(deps: Deps, dca_id: String) -> StdResult<DCAResponse> {
     let dca = DCA_LIST.may_load(deps.storage, dca_id)?;
     Ok(DCAResponse { dca })
