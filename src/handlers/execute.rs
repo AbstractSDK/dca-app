@@ -122,7 +122,7 @@ fn create_dca(
 ) -> AppResult {
     // Only the admin should be able to create dca
     app.admin.assert_admin(deps.as_ref(), &info.sender)?;
-    
+
     let config = CONFIG.load(deps.storage)?;
 
     // Generate DCA ID
@@ -236,7 +236,7 @@ fn convert(deps: DepsMut, env: Env, info: MessageInfo, app: DCAApp, dca_id: Stri
         name: dca.source_asset.into(),
         amount: Uint128::new(100),
     };
-    // TODO: remove dca on failed swap? 
+    // TODO: remove dca on failed swap?
     // Or `stop_on_fail` should be enough
     messages.push(app.dex(deps.as_ref(), dca.dex).swap(
         offer_asset,
