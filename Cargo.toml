@@ -46,13 +46,13 @@ abstract-app = { version = "0.16.1" }
 abstract-sdk = { version = "0.16.1" }
 
 # Dependencies for interface
-abstract-interface = { version = "0.16.1", optional = true }
+abstract-interface = { version = "0.19.0", optional = true }
 cw-orch = { version = "0.13", optional = true }
 croncat-app = { git = "https://github.com/CronCats/abstract-croncat-app.git", rev = "5077a7e", default-features = false}
 abstract-dex-adapter = { git = "https://github.com/AbstractSDK/adapters.git", default-features = false}
 [dev-dependencies]
 abstract-dca-app = { path = ".", features = ["interface"] }
-abstract-interface = { version = "0.16.1", features = ["daemon"] }
+abstract-interface = { version = "0.19.0", features = ["daemon"] }
 abstract-testing = { version = "0.16.1" }
 abstract-sdk = { version = "0.16.1", features = ["test-utils"] }
 speculoos = "0.11.0"
